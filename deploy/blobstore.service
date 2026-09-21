@@ -1,0 +1,47 @@
+[Unit]
+Description=blobstore — 存字节发链接的 HTTP 服务
+Documentation=https://gitea.chenzhuo.com.cn/zhuo/blobstore
+# Binding to a Tailscale address needs that interface to exist already.
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/blobstore/config
+ExecStart=/usr/local/bin/blobstore
+Restart=on-failure
+RestartSec=5s
+
+# The service owns no files outside its state directory, so it needs no account
+# of its own: systemd allocates a uid for the run and hands it /var/lib/blobstore.
+DynamicUser=yes
+StateDirectory=blobstore
+StateDirectoryMode=0700
+
+# It reads one config file, writes one directory and opens one socket. Everything
+# else is closed off.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+# The configured port is above 1024, so no privilege is needed to bind it.
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

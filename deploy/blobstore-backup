@@ -1,0 +1,15 @@
+#!/bin/sh
+# Copy the blobstore data directory to Google Drive through an rclone crypt
+# remote, so Drive only ever holds ciphertext. Invoked by blobstore-backup.timer.
+#
+# copy, not sync: a file deleted here stays in the backup. That is the point —
+# an accidental delete or a bad write on this machine must not propagate.
+set -e
+#
+# ERROR level: a run that works writes nothing. systemd still records that the
+# service started, finished and with what exit code, so "did it run" stays
+# answerable; only the per-file chatter is gone.
+exec /usr/bin/rclone copy /var/lib/blobstore blobcrypt:blobstore \
+  --transfers 4 \
+  --checkers 8 \
+  --log-level ERROR
