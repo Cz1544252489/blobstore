@@ -296,3 +296,48 @@ func randomHex(n int) string {
 	_, _ = rand.Read(buf)
 	return hex.EncodeToString(buf)
 }
+
+// storeStats sums what one store holds: current files from the index, and
+// superseded versions both as the index records them and as blobs-old/ holds
+// them. The two old-version counts differ only if files were removed by hand.
+type storeStats struct {
+	Count      int
+	TotalSize  int64
+	History    int
+	OldFiles   int
+	OldSize    int64
+	LastStored time.Time
+}
+
+// Stats reads the index and lists blobs-old/ once, without taking the lock,
+// like ListBlobs.
+func (s *Store) Stats() (storeStats, error) {
+	idx, err := s.loadIndex()
+	if err != nil {
+		return storeStats{}, err
+	}
+	var st storeStats
+	for _, rec := range idx.Blobs {
+		st.Count++
+		st.TotalSize += rec.Size
+		if rec.StoredAt.After(st.LastStored) {
+			st.LastStored = rec.StoredAt
+		}
+	}
+	for _, entries := range idx.History {
+		st.History += len(entries)
+	}
+	entries, err := os.ReadDir(s.oldDir())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return storeStats{}, err
+	}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		st.OldFiles++
+		st.OldSize += info.Size()
+	}
+	return st, nil
+}

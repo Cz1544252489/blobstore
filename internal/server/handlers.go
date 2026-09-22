@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // tenant is one group of files with its own token and store. The default group has an empty name;
@@ -31,12 +32,18 @@ type server struct {
 	tenants    []*tenant
 	origins    []string
 	publicBase string
-	mux        *http.ServeMux
+	// root is the top storage directory, where the backup leaves its status
+	// file; version and startedAt are reported by /status.
+	root      string
+	version   string
+	startedAt time.Time
+	mux       *http.ServeMux
 }
 
-func newServer(tenants []*tenant, origins []string, publicBase string) *server {
-	s := &server{tenants: tenants, origins: origins, publicBase: publicBase}
+func newServer(tenants []*tenant, origins []string, publicBase, root, version string) *server {
+	s := &server{tenants: tenants, origins: origins, publicBase: publicBase, root: root, version: version, startedAt: time.Now().UTC()}
 	s.mux = http.NewServeMux()
+	s.mux.HandleFunc("/status", s.handleStatus)
 	s.mux.HandleFunc("/blobs", s.handleBlobs)
 	s.mux.HandleFunc("/blobs/", s.handleBlobsID)
 	s.mux.HandleFunc("/files/", s.handleFile)

@@ -5,4 +5,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# BLOBSTORE_BACKUP_DEST, e.g. blobcrypt:hd; the script refuses to run without it.
+EnvironmentFile=/etc/blobstore/backup
 ExecStart=/usr/local/bin/blobstore-backup

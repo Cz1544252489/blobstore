@@ -24,6 +24,9 @@
 /** How long one transfer is given; a large file takes tens of seconds to travel. */
 const TRANSFER_TIMEOUT_MS = 300_000;
 
+/** How long the overview waits for one service's status or list before showing it as unreachable. */
+const OVERVIEW_TIMEOUT_MS = 20_000;
+
 /** What a note is left as while its content lives elsewhere. Blank content would read as empty. */
 const PLACEHOLDER_CONTENT = " ";
 
@@ -197,6 +200,124 @@ async function moveBack(note, service, config) {
     return { ok: true, serviceName: service.name, size: formatSize(bytes.length) };
 }
 
+/**
+ * Everything the overview page shows, one entry per configured service: what the service reports
+ * about itself (GET /status), what it holds (GET /blobs), and how that lines up with the notes that
+ * record content there. Tokens stay here; the page receives names, hosts and figures only.
+ */
+async function overview() {
+    const config = readConfig();
+    const fallback = defaultService(config);
+
+    // Every note whose content is away, by the service its record points at.
+    const assigned = new Map(config.services.map((service) => [service.id, []]));
+    const unknownTarget = [];
+    for (const note of relocatedNotes()) {
+        const service = serviceFor(note, config);
+        if (service) {
+            assigned.get(service.id).push(note);
+        } else {
+            unknownTarget.push({ ...noteRef(note), target: note.getLabelValue("relocationTarget") });
+        }
+    }
+
+    const services = await Promise.all(
+        config.services.map(async (service) => {
+            const [status, list] = await Promise.all([
+                getJSON(service, "status").then((value) => ({ value }), (e) => ({ error: e.message })),
+                getJSON(service, "blobs").then((value) => ({ value }), (e) => ({ error: e.message }))
+            ]);
+            const notes = assigned.get(service.id);
+            const entry = {
+                id: service.id,
+                name: service.name,
+                host: service.baseUrl.replace(/^https?:\/\//, "").replace(/\/$/, ""),
+                isDefault: fallback !== null && fallback.id === service.id,
+                status: status.value ?? null,
+                statusError: status.error ?? null,
+                listError: list.error ?? null,
+                noteCount: notes.length,
+                blobs: [],
+                missing: []
+            };
+            if (!list.value) {
+                return entry;
+            }
+
+            const held = new Set();
+            for (const blob of Array.isArray(list.value.blobs) ? list.value.blobs : []) {
+                held.add(blob.id);
+                const note = api.getNote(blob.id);
+                entry.blobs.push({
+                    id: blob.id,
+                    filename: blob.filename ?? "",
+                    size: blob.size ?? 0,
+                    storedAt: blob.storedAt ?? null,
+                    versions: blob.versions ?? 0,
+                    note: note ? noteRef(note) : null,
+                    state: blobState(note, blob, service, config)
+                });
+            }
+            for (const note of notes) {
+                if (!held.has(note.noteId)) {
+                    entry.missing.push({ ...noteRef(note), size: note.getLabelValue("relocationSize") ?? "" });
+                }
+            }
+            return entry;
+        })
+    );
+
+    return { generatedAt: new Date().toISOString(), services, unknownTarget };
+}
+
+/** Notes showing content from outside: a webView carrying any of the relocation records. */
+function relocatedNotes() {
+    const found = new Map();
+    for (const name of ["relocationHash", "relocationTarget", "relocationInfo", "relocationId"]) {
+        for (const note of api.getNotesWithLabel(name)) {
+            if (note.type === "webView" && readHash(note) !== null) {
+                found.set(note.noteId, note);
+            }
+        }
+    }
+    return found.values();
+}
+
+function noteRef(note) {
+    return { noteId: note.noteId, title: note.title };
+}
+
+/**
+ * How one stored file relates to the note with its id:
+ *   ok        the note shows it from this service, checksums agree
+ *   mismatch  the note shows it from here, but its recorded checksum is not this file's
+ *   stray     the note holds its content in the database again; this copy was left behind
+ *   elsewhere the note's content is recorded on another service
+ *   orphan    no note has this id (deleted, or from another database)
+ */
+function blobState(note, blob, service, config) {
+    if (!note) {
+        return "orphan";
+    }
+    if (note.type !== "webView" || readHash(note) === null) {
+        return "stray";
+    }
+    const owner = serviceFor(note, config);
+    if (!owner || owner.id !== service.id) {
+        return "elsewhere";
+    }
+    const recorded = readHash(note);
+    return recorded && typeof blob.sha256 === "string" && !blob.sha256.startsWith(recorded) ? "mismatch" : "ok";
+}
+
+async function getJSON(service, path) {
+    const response = await request("GET", `${service.baseUrl}${path}`, {
+        headers: { Authorization: `Bearer ${service.token}` },
+        timeoutMs: OVERVIEW_TIMEOUT_MS
+    });
+    return await response.json();
+}
+
 async function upload(service, note, bytes, mime) {
     const headers = {
         Authorization: `Bearer ${service.token}`,
@@ -250,10 +371,10 @@ async function remove(service, id) {
  * One call to the service. Every failure names the method and the address, so a wrong url in the
  * config reads as such instead of as a bare status code.
  */
-async function request(method, url, { headers, body, allowNotFound = false }) {
+async function request(method, url, { headers, body, allowNotFound = false, timeoutMs = TRANSFER_TIMEOUT_MS }) {
     let response;
     try {
-        response = await globalThis.fetch(url, { method, headers, body, signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) });
+        response = await globalThis.fetch(url, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
     } catch (e) {
         throw new Error(`${method} ${url} failed: ${e.cause?.message ?? e.message}`);
     }
@@ -383,4 +504,4 @@ function formatSize(size) {
     return `${Math.round(kib / 102.4) / 10} MiB`;
 }
 
-module.exports = { move, createConfigNote };
+module.exports = { move, createConfigNote, overview };

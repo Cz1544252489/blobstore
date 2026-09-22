@@ -29,6 +29,7 @@ deploy/              systemd 单元(编进程序)、加密备份脚本与单元
 | 方法 | 路径 | 鉴权 | 作用 |
 |---|---|---|---|
 | POST | `/blobs` | 需要 | 存入一份文件,返回标识与可直接打开的地址 |
+| GET | `/status` | 需要 | 本组的文件数与大小、硬盘剩余、最近一次备份的结果 |
 | GET | `/blobs` | 需要 | 列出本组全部当前文件与合计 |
 | GET | `/blobs/<id>` | 需要 | 按标识取回文件字节 |
 | DELETE | `/blobs/<id>` | 需要 | 按标识删除文件的当前版本 |
@@ -59,9 +60,26 @@ deploy/              systemd 单元(编进程序)、加密备份脚本与单元
 
 `versions` 是历史版本数(不含当前这一份),已删除的 id 不列出。
 
+`GET /status`:
+
+```json
+{"version": "v0.5.1", "startedAt": "<RFC 3339>", "now": "<RFC 3339>",
+ "group": {"name": "", "count": 133, "totalSize": 1066165395, "versions": 0,
+           "oldFiles": 0, "oldSize": 0, "lastStoredAt": "<RFC 3339>"},
+ "disk": {"total": 10462990336, "free": 4956471296},
+ "backup": {"started": "…", "finished": "…", "exitCode": 0, "dest": "blobcrypt:hd",
+            "local": {"count": 135, "bytes": 1066215380},
+            "remote": {"count": 137, "bytes": 1093117145, "sizeless": 0}}}
+```
+
+`group` 只统计令牌所属的分组;`versions` 是索引里的历史条数,`oldFiles`/`oldSize` 是 `blobs-old/` 里实际的文件。
+`disk` 是存放目录所在文件系统的总量与普通进程还能写入的量,只在 Linux 上给出。`backup` 原样转发备份脚本
+写下的 `<root>/backup-status.json`(见「备份到云盘」),没有这个文件时是 `null`,读不了时是 `{"error": "…"}`;
+它覆盖整个存放目录,所以每个分组看到的是同一份。
+
 `DELETE /blobs/<id>`:204;不存在时 404。只删当前版本与索引里的当前记录,历史文件与历史记录保留。
 
-**鉴权**:四个 `/blobs` 接口都要 `Authorization: Bearer <token>`,与每个分组的令牌逐一用
+**鉴权**:`/status` 与四个 `/blobs` 接口都要 `Authorization: Bearer <token>`,与每个分组的令牌逐一用
 `crypto/subtle.ConstantTimeCompare` 比较。跨源调用还要来源在 `BLOBSTORE_ORIGINS` 里。
 
 **`/files/` 的访问串**:网页视图用 iframe 加载这个地址,加不上请求头,所以它不校验令牌,改为在
@@ -90,6 +108,7 @@ id(笔记 id 不难猜)取不到内容。串不对与 id 不存在一样回 404,
 <root>/blobs-old/<id>-<UTC 时间戳>     被覆盖或删除下来的旧版本
 <root>/index.json                     索引
 <root>/tenants/<名字>/                 其他分组,内部结构同上
+<root>/backup-status.json             备份脚本写的最近一次结果(服务只读)
 ```
 
 `index.json` 有两个顶层字段:`blobs` 是每个 id 的当前记录(mime、原文件名、大小、sha256、存入时间、
@@ -135,11 +154,35 @@ location /blobstore/ {
 ### 备份到云盘
 
 `deploy/` 下另有每天一次的加密备份:`blobstore-backup`(脚本放进 `/usr/local/bin/`)、
-`blobstore-backup.service` 与 `.timer`(放进 `/etc/systemd/system/`),`systemctl enable --now blobstore-backup.timer`。
+`blobstore-backup.service` 与 `.timer`(放进 `/etc/systemd/system/`),再写一份 `/etc/blobstore/backup`:
+
+```
+BLOBSTORE_BACKUP_DEST=blobcrypt:<机器名>
+```
+
+然后 `systemctl daemon-reload && systemctl enable --now blobstore-backup.timer`。脚本没有读到
+`BLOBSTORE_BACKUP_DEST` 就拒绝运行,不猜目标。
+
 它把整个存放目录(含各分组)经 rclone 的 crypt 远端 `copy` 到云盘,云盘上只有密文。要先配好两个远端:
 一个指向云盘(建议用 Google Drive 的 `drive.file` 这类受限凭据),一个 `type = crypt` 包住前者。
 **crypt 的口令原文要另外存在取不到这台机器也能打开的地方**,恢复全靠它。用 `copy` 不用 `sync`:
 这边误删的文件不会连带从备份里删掉。
+
+**几台机器备份到同一个 crypt 远端时,目标路径必须各不相同**(按机器名分):口令相同时,同名文件加密后的
+名字也相同,写到同一路径下,各台的 `index.json` 会互相覆盖。
+
+每次运行(成功与否)结束后,脚本在存放目录顶层写 `backup-status.json`:开始与结束时间、rclone 的退出码、
+目标、本地的文件数与字节数、`rclone size` 统计的目标上的文件数与字节数。这个文件本身不参与复制,
+由 `GET /status` 转发。目标上的数目可能多于本地:本地删掉的文件在备份里保留。
+
+各台错开运行时间时,用 drop-in 覆盖定时器,不改单元文件本身:
+
+```
+# /etc/systemd/system/blobstore-backup.timer.d/time.conf
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 05:00:00
+```
 
 ### 环境变量
 
@@ -167,8 +210,19 @@ location /blobstore/ {
 4. 刷新页面。打开一篇文件笔记,右侧面板的「组件」页里出现「内容迁移」卡片。第一次出现时,插件在
    小部件笔记旁边建一篇「内容迁移配置」,卡片底部有它的链接。
 
-导入后得到两篇笔记:「内容迁移」(JSX,带 `#widget`)和它的子笔记 `relocationBackend`(JS backend)。
-**子笔记的标题就是小部件调用它时用的名字,不能改。** 更新插件:删掉这两篇,导入新的 zip;配置笔记不受影响。
+导入后得到两棵子树:
+
+```
+内容迁移                (JSX,带 #widget)
+└─ relocationBackend    (JS backend)
+内容迁移总览            (渲染笔记,~renderNote 指向下一篇)
+└─ 内容迁移总览页面     (JSX)
+   └─ relocationBackend (上面那篇的克隆)
+```
+
+**`relocationBackend` 的标题就是脚本调用它时用的名字,不能改。** 后端调用只在发起调用的脚本笔记的子笔记里
+找模块,所以两段 JSX 下面都要有它;总览页下面那篇是克隆,代码只有一份。更新插件:删掉「内容迁移」与
+「内容迁移总览」两棵子树,导入新的 zip;配置笔记不受影响。
 
 ### 配置
 
@@ -193,7 +247,14 @@ location /blobstore/ {
 
 ### 界面
 
-卡片只在两种笔记上出现:`file` 笔记给「搬到外部存储」;带迁移标签的 `webView` 笔记显示存放的服务
+**总览页**:打开「内容迁移总览」。每个服务一张卡片:文件数与大小、旧版本、最近存入时间、库里指向它的笔记数、
+硬盘剩余(低于 15% 标红)、最近一次备份(失败或超过 36 小时标红)与本地/云端的文件数、服务的版本与启动时间。
+下面列出对不上的记录:服务上有、库里没有这篇笔记;笔记已取回、外面还留着副本;笔记记在另一个服务上;
+校验值与笔记记录不符;笔记记着在这里、服务上却没有这个文件;笔记记录的服务不在配置里。最后是各服务的文件清单,
+每行可点到对应的笔记。数据经后端取得(令牌不进前端),每个服务的请求最多等 20 秒;页面一直停在加载中,
+多半是 `runOnBackend` 在等本窗口追上服务器的实体变更,刷新整个页面即可。
+
+**卡片**只在两种笔记上出现:`file` 笔记给「搬到外部存储」;带迁移标签的 `webView` 笔记显示存放的服务
 与大小,给「取回数据库」。结果(如「已搬到 hd(4.2 MiB)」)与出错原因显示在卡片里,同时弹出提示;
 请求失败时写明方法与地址。只记录不报错的情况(撤销上传失败、删除外部副本失败)写在 Trilium 数据
 目录 `log/` 下当天的日志里。

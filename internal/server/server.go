@@ -48,7 +48,7 @@ func Run(version string) error {
 		return err
 	}
 	tenants := append([]*tenant{{key: key, store: store}}, extra...)
-	srv := newServer(tenants, origins, publicBase)
+	srv := newServer(tenants, origins, publicBase, root, version)
 
 	fmt.Printf("blobstore %s\n", version)
 	fmt.Printf("  地址   http://%s\n", addr)
@@ -59,7 +59,7 @@ func Run(version string) error {
 	for _, t := range extra {
 		fmt.Printf("  分组   %s(%s,%s/files/%s/<id>)\n", t.name, t.store.root, publicBase, t.name)
 	}
-	fmt.Println("  接口:POST /blobs;GET /blobs;GET /blobs/<id>;DELETE /blobs/<id>;GET /files/[<分组>/]<id>(无鉴权)")
+	fmt.Println("  接口:GET /status;POST /blobs;GET /blobs;GET /blobs/<id>;DELETE /blobs/<id>;GET /files/[<分组>/]<id>(无鉴权)")
 	fmt.Println("  Ctrl+C 停止")
 
 	httpSrv := &http.Server{

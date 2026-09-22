@@ -17,6 +17,8 @@ Trilium 笔记内容的外部存放,2026-09-20 起分三处建成,2026-09-21 合
   `internal/relocate` 与 `plugin`,`internal/relocate` 也不 import `internal/server`。改动后用
   `go list -deps ./internal/server | grep -E "relocate|plugin"` 确认为空。
 - 服务端的环境变量都是 `BLOBSTORE_*`,命令行的都是 `RELOCATE_*`,两套不混用。
+- **备份目标按机器分路径**(`BLOBSTORE_BACKUP_DEST=blobcrypt:<机器名>`):同一对口令下,同名文件的密文
+  名字相同,共用一个路径会让各台的 `index.json` 互相覆盖。
 - `internal/install` 只在服务器上以 root 运行,只碰服务自己的文件(程序、单元、配置),不碰任何 Trilium 凭据。
 
 ## 安装(`internal/install`)
@@ -41,6 +43,8 @@ Trilium 笔记内容的外部存放,2026-09-20 起分三处建成,2026-09-21 合
 - **`DeleteBlob` 先提交索引、再删文件**,顺序不能反:最坏情况是留一个不再被索引到的孤儿文件,而不是索引
   指着不存在的文件、下次 `GET` 报 500。
 - **索引分 `blobs`(当前)与 `history`(历史)**,`history` 只增不删。
+- **`/status` 的备份部分只转发 `<root>/backup-status.json`**:文件由备份脚本以 root 写入,服务只读、
+  不解释字段,脚本加字段不必改服务。备份覆盖整个存放目录,所以取顶层 `root` 的这份,不取分组目录。
 - **`GET /blobs/<id>` 与 `GET /files/<id>` 共用读取代码,差别在鉴权**:别把 `/files` 裹进 `checkAuth`
   (网页视图会打不开),也别去掉 `k` 的比对(知道 id 就能取走内容)。
 - **访问串每次存入新内容时重新生成**,覆盖内容会让指向旧版本的地址失效;字节完全相同的重复提交(按 sha256
@@ -71,9 +75,13 @@ Trilium 笔记内容的外部存放,2026-09-20 起分三处建成,2026-09-21 合
 ## 插件(`plugin/`)
 
 - **后端笔记的标题必须是 `relocationBackend`**:Trilium 把子笔记按标题作为变量传给父笔记的脚本。
-  改名要同时改 `plugin.go` 与小部件。
+  改名要同时改 `plugin.go`、小部件与总览页。
+- **后端调用只在发起调用的那段脚本的子笔记里找模块**(`executeScript` 按 `currentNoteId` 打包),所以总览页
+  的 JSX 下面也要有 `relocationBackend`;zip 里用克隆条目(`isClone`,同一个 `noteId`),不要复制出第二份代码。
 - **传给 `runOnBackend` 的函数会被转成字符串送到后端执行**,只能用参数、`api` 与 `relocationBackend`;
   函数体里不写可选链与空值合并,sucrase 会把它们改写成只在前端存在的辅助函数。
+- **总览页的数据必须经后端取**(令牌不进前端);它是只读调用,仍可能碰到下一条说的等待,所以页面
+  给了刷新按钮和超时说明。
 - **不改动实体的调用不走 `runOnBackend`**:它返回前要等本窗口追上服务器最新的实体变更编号,那条变更若
   永远不推送过来,调用就一直等到刷新页面。所以前端直接读配置笔记,只有建配置笔记与搬运经后端。
 - 后端里的全局对象经 `globalThis` 取(`fetch`、`crypto`、`TextEncoder`):脚本在 Trilium 的模块里求值,

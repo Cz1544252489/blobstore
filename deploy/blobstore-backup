@@ -4,12 +4,47 @@
 #
 # copy, not sync: a file deleted here stays in the backup. That is the point —
 # an accidental delete or a bad write on this machine must not propagate.
-set -e
 #
+# The destination comes from BLOBSTORE_BACKUP_DEST (set in /etc/blobstore/backup,
+# e.g. blobcrypt:hd). Each machine writes under its own name: two machines
+# sharing one path would overwrite each other's index.json.
+#
+# Every run, successful or not, leaves backup-status.json at the top of the data
+# directory for GET /status to report. It is excluded from the copy itself.
+set -u
+
+ROOT=/var/lib/blobstore
+STATUS="$ROOT/backup-status.json"
+DEST=${BLOBSTORE_BACKUP_DEST:-}
+if [ -z "$DEST" ]; then
+  echo "BLOBSTORE_BACKUP_DEST is not set; refusing to guess a destination" >&2
+  exit 1
+fi
+
+started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
 # ERROR level: a run that works writes nothing. systemd still records that the
-# service started, finished and with what exit code, so "did it run" stays
-# answerable; only the per-file chatter is gone.
-exec /usr/bin/rclone copy /var/lib/blobstore blobcrypt:blobstore \
+# service started, finished and with what exit code.
+rclone copy "$ROOT" "$DEST" \
+  --exclude "/backup-status.json" \
   --transfers 4 \
   --checkers 8 \
   --log-level ERROR
+code=$?
+
+finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# What the page compares: files and bytes here against what the destination
+# holds after the copy. The destination may hold more, since nothing is deleted there.
+local_count=$(find "$ROOT/" -type f ! -path "$ROOT/backup-status.json*" | wc -l)
+local_bytes=$(find "$ROOT/" -type f ! -path "$ROOT/backup-status.json*" -printf '%s\n' | awk '{s+=$1} END {printf "%d", s}')
+remote=$(rclone size --json "$DEST" --exclude "/backup-status.json" 2>/dev/null) || remote=""
+[ -n "$remote" ] || remote=null
+
+tmp="$STATUS.tmp"
+printf '{"started":"%s","finished":"%s","exitCode":%d,"dest":"%s","local":{"count":%d,"bytes":%s},"remote":%s}\n' \
+  "$started" "$finished" "$code" "$DEST" "$local_count" "${local_bytes:-0}" "$remote" > "$tmp"
+chmod 644 "$tmp"
+mv "$tmp" "$STATUS"
+
+exit "$code"
