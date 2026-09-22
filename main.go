@@ -23,7 +23,7 @@ import (
 var unitFile []byte
 
 // version is bumped whenever behavior changes; -version prints it, and the plugin zip carries it.
-var version = "v0.5.1"
+var version = "v0.5.2"
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] == "serve" {

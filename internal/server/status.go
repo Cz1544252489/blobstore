@@ -48,8 +48,8 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"group":     group,
 		"backup":    nil,
 	}
-	if total, free, ok := diskUsage(s.root); ok {
-		out["disk"] = map[string]any{"total": total, "free": free}
+	if total, used, free, ok := diskUsage(s.root); ok {
+		out["disk"] = map[string]any{"total": total, "used": used, "free": free}
 	}
 	backup, err := readBackupStatus(s.root)
 	switch {

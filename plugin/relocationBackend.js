@@ -270,6 +270,34 @@ async function overview() {
     return { generatedAt: new Date().toISOString(), services, unknownTarget };
 }
 
+/**
+ * The overview cut down to what the right-pane card shows under every note: per service, the figures
+ * that say whether anything needs a look, and how many records disagree.
+ */
+async function summary() {
+    const full = await overview();
+    return {
+        generatedAt: full.generatedAt,
+        unknownTarget: full.unknownTarget.length,
+        services: full.services.map((service) => {
+            const status = service.status || {};
+            const group = status.group || null;
+            const backup = status.backup || null;
+            return {
+                id: service.id,
+                name: service.name,
+                isDefault: service.isDefault,
+                error: service.statusError || service.listError || null,
+                count: group ? group.count : null,
+                totalSize: group ? group.totalSize : null,
+                disk: status.disk || null,
+                backup: backup ? { exitCode: backup.exitCode, finished: backup.finished || null, error: backup.error || null } : null,
+                problems: service.blobs.filter((blob) => blob.state !== "ok").length + service.missing.length
+            };
+        })
+    };
+}
+
 /** Notes showing content from outside: a webView carrying any of the relocation records. */
 function relocatedNotes() {
     const found = new Map();
@@ -504,4 +532,4 @@ function formatSize(size) {
     return `${Math.round(kib / 102.4) / 10} MiB`;
 }
 
-module.exports = { move, createConfigNote, overview };
+module.exports = { move, createConfigNote, overview, summary };

@@ -46,13 +46,31 @@ function formatBytes(bytes) {
     return `${unit === 0 ? value : value.toFixed(value < 10 ? 2 : 1)} ${units[unit]}`;
 }
 
+/** "2026年9月22日 12:20". Not toLocaleString("zh-CN"), whose "2026/9/22" reads as a fraction at a glance. */
 function formatTime(iso) {
     if (!iso) {
         return "—";
     }
     const date = new Date(iso);
-    return isNaN(date.getTime()) ? String(iso) : date.toLocaleString("zh-CN", { hour12: false });
+    if (isNaN(date.getTime())) {
+        return String(iso);
+    }
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+/**
+ * Disk use the way df reports it: used / (used + free), rounded up, so it matches "Use%" on the machine.
+ * A service older than v0.5.2 sends no used figure; total minus free stands in for it there.
+ */
+function diskUsePercent(disk) {
+    const used = typeof disk.used === "number" ? disk.used : disk.total - disk.free;
+    const base = used + disk.free;
+    return base > 0 ? Math.ceil((used / base) * 100) : null;
+}
+
+/** Same threshold as the overview page and the card. */
+const DISK_WARN_PERCENT = 85;
 
 function Row({ label, children }) {
     return (
@@ -101,7 +119,7 @@ function ServiceCard({ service }) {
     const status = service.status;
     const group = status ? status.group : null;
     const disk = status ? status.disk : null;
-    const freeShare = disk && disk.total ? disk.free / disk.total : null;
+    const usePercent = disk ? diskUsePercent(disk) : null;
     const problems = service.blobs.filter((blob) => blob.state !== "ok").length + service.missing.length;
     return (
         <div style={styles.card}>
@@ -126,10 +144,9 @@ function ServiceCard({ service }) {
                     ) : null}
                     <Row label="库里指向这里">{service.noteCount} 篇笔记</Row>
                     {disk ? (
-                        <Row label="硬盘剩余">
-                            <span style={freeShare !== null && freeShare < 0.15 ? styles.warn : undefined}>
-                                {formatBytes(disk.free)} / {formatBytes(disk.total)}
-                                {freeShare !== null ? `（${Math.round(freeShare * 100)}%）` : ""}
+                        <Row label="硬盘">
+                            <span style={usePercent !== null && usePercent >= DISK_WARN_PERCENT ? styles.warn : undefined}>
+                                已用 {usePercent !== null ? `${usePercent}%` : "—"}（已用 {formatBytes(disk.used ?? disk.total - disk.free)}，可用 {formatBytes(disk.free)}，共 {formatBytes(disk.total)}）
                             </span>
                         </Row>
                     ) : null}

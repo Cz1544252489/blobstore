@@ -91,6 +91,8 @@ func Write(dir, version string) (string, error) {
 		Attributes: []attribute{
 			{Type: "relation", Name: "renderNote", Value: "crlOvPage001", Position: 10},
 			{Type: "label", Name: "iconClass", Value: "bx bx-bar-chart-alt-2", Position: 20},
+			// The widget finds the page by this label to link to it.
+			{Type: "label", Name: "relocationOverview", Position: 30},
 		},
 		Attachments: []struct{}{}, DataFileName: "relocation-overview-note.html", DirFileName: "relocation-overview-note", Children: []noteMeta{page},
 	}
