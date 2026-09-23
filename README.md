@@ -1,5 +1,7 @@
 # blobstore
 
+[English](README.en.md)
+
 **一个 Trilium 插件,把笔记里的大文件搬到外部存放,库里只留一个占位,需要时再取回。**
 Trilium 的数据库和它的每一份备份因此不必反复携带大文件。
 
