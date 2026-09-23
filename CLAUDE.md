@@ -115,4 +115,8 @@ go list -deps ./internal/server | grep -E "relocate|plugin"    # 应当为空
 
 - 版本号只在 `main.go` 的 `version` 里,插件 zip 带同一个版本号。功能有变化时推进,推进到哪一版由用户定;
   只改文档或注释不推进。
+- **版本号推进后,在那个提交上打标签 `v<版本>` 并在 Gitea 上发一版**(2026-09-23 起,首版 v0.5.2):附件是插件 zip
+  `blobstore-plugin-v<版本>.zip`、Linux 程序 `blobstore-linux-amd64`、Windows 程序 `blobstore-windows-amd64.exe`,三者都从同一个提交重新编译;
+  说明写这版改了什么。建发布与传附件经 Gitea 接口(`POST /api/v1/repos/zhuo/blobstore/releases` 与 `.../releases/<id>/assets`),
+  令牌用本机 git 存的那份。
 - 未经用户明确要求不提交、不推送;Gitea 直连,不设代理。
