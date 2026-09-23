@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-本文件为 Claude Code 在本项目中工作时提供指导。用法、协议与配置见 `README.md`,这里只写容易出错的地方。
+本文件为 Claude Code 在本项目中工作时提供指导。用法、协议与配置见 Gitea 上的 Wiki
+(`https://gitea.chenzhuo.com.cn/zhuo/blobstore/wiki`,2026-09-23 起),`README.md` 只写定位、上手步骤与目录结构;这里只写容易出错的地方。
 
 ## 这是什么
 
